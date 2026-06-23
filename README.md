@@ -186,21 +186,12 @@ Possible reasons include:
 
 ```text
 .
-├── data/
-│   └── final_data.npz
-│
 ├── notebooks/
 │   └── Finalized_Model_GRU_1.ipynb
 │
-├── models/
-│   ├── gnn_gru_kan.py
-│   ├── stgat_gcn.py
-│   └── federated_utils.py
-│
 ├── results/
 │   ├── metrics/
-│   ├── plots/
-│   └── checkpoints/
+│   └──plots/
 │
 ├── requirements.txt
 └── README.md
