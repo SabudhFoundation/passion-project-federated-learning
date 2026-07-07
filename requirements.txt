@@ -1,39 +1,11 @@
-# Core Data Processing
-
-numpy>=1.24.0
-pandas>=2.0.0
-
-# Machine Learning
-
-scikit-learn>=1.3.0
-
-# Deep Learning
-
-torch>=2.2.0
-
-# Graph Neural Networks
-
-torch-geometric>=2.5.0
-
-# Kolmogorov-Arnold Networks
-
-efficient-kan>=0.1.7
-
-# Federated Learning
-
-flwr>=1.18.0
-ray>=2.10.0
-
-# Visualization
-
-matplotlib>=3.7.0
-
-# Utilities
-
-tqdm>=4.66.0
-
-# Notebook Support
-
-jupyter>=1.0.0
+torch>=2.3.0
+torch-geometric>=2.6.0
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.5.0
+matplotlib>=3.9.0
+# Jupyter support
 ipykernel>=6.29.0
+jupyter>=1.0.0
 notebook>=7.0.0
+git+https://github.com/Blealtan/efficient-kan.git
