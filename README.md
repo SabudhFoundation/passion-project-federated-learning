@@ -187,7 +187,7 @@ Possible reasons include:
 ```text
 .
 ├── notebooks/
-│   └── Finalized_Model_GRU_1.ipynb
+│   └── Finalized_Model_GRU.ipynb
 │
 ├── results/
 │   ├── metrics/
@@ -208,6 +208,9 @@ git clone https://github.com/yourusername/federated-traffic-forecasting.git
 cd federated-traffic-forecasting
 ```
 
+Download the dataset from:
+     https://drive.google.com/file/d/1iTa07LPK1uC2051IQJ6UFwdVm_B4M9jy/view?usp=drive_link
+
 Install dependencies:
 
 ```bash
@@ -218,20 +221,16 @@ pip install -r requirements.txt
 
 # Dependencies
 
-* Python 3.10+
+* Python 3.12.x
 * PyTorch
 * PyTorch Geometric
 * NumPy
 * Pandas
+* scipy
+* networkx
 * Scikit-learn
 * Matplotlib
 * efficient-kan
-
-Install manually:
-
-```bash
-pip install torch torch-geometric numpy pandas scikit-learn matplotlib efficient-kan
-```
 
 ---
 
@@ -240,8 +239,9 @@ pip install torch torch-geometric numpy pandas scikit-learn matplotlib efficient
 Launch the notebook:
 
 ```bash
-jupyter notebook Finalized_Model_GRU_1.ipynb
+jupyter notebook Finalized_Model_GRU.ipynb
 ```
+Update the Dataset path in notebook Finalized_Model_GRU  "   CSV_PATH = "Path on your system"     "
 
 ---
 
