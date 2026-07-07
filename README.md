@@ -204,7 +204,7 @@ Possible reasons include:
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/federated-traffic-forecasting.git
+git clone https://github.com/SabudhFoundation/federated-traffic-forecasting.git
 cd federated-traffic-forecasting
 ```
 
