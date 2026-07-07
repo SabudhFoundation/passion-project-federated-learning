@@ -243,12 +243,6 @@ Launch the notebook:
 jupyter notebook Finalized_Model_GRU_1.ipynb
 ```
 
-or
-
-```bash
-python train.py
-```
-
 ---
 
 # Evaluation Metrics
