@@ -1,44 +1,4 @@
-"""
-Buffered asynchronous aggregation with staleness weighting.
-
-Board item 4: "handle the intermittent connectivity by adding asynchronous
-updates to the global"
-
-Why this file exists
---------------------
-Flower does NOT ship asynchronous federated learning. Its Strategy API is
-round-synchronous: configure_fit -> wait for the sampled clients -> aggregate_fit.
-So "use Flower" does not give us item 4 for free. We implement it.
-
-Three aggregation modes are implemented here so they can be compared directly
-on the same intermittency trace:
-
-  SYNC       - FedAvg. Server waits for all N sampled clients. One straggler or
-               dropout stalls or shrinks the round. This is Phase 1's behaviour
-               and the baseline to beat.
-
-  BUFFERED   - FedBuff-style. Server keeps a buffer and aggregates as soon as K
-               of N updates have landed, K < N. Late updates roll into the next
-               aggregation instead of being discarded. No client blocks the round.
-
-  STALENESS  - BUFFERED plus staleness discounting. A client that started from
-               global version v and reports at version v' has staleness
-               s = v' - v. Its update is weighted (1 + s)^(-alpha), so updates
-               computed against an old global model count for less rather than
-               dragging the global backwards.
-
-The staleness weight is the standard polynomial discount used across the async
-FL literature (FedAsync, FedBuff, FedStaleWeight). alpha=0 recovers plain
-buffered aggregation.
-
-Design note on the Flower boundary
-----------------------------------
-The aggregation maths lives in BufferedAsyncAggregator, which is pure
-numpy and has no Flower import. FlowerBufferedAsyncStrategy wraps it in
-Flower's Strategy interface. Keeping them separate means the algorithm is
-unit-testable without spinning up a federation, and the same aggregator drives
-sim_intermittency.py. Do not merge these two classes.
-"""
+"""Buffered asynchronous aggregation with optional staleness weighting."""
 
 from __future__ import annotations
 
@@ -53,7 +13,6 @@ SYNC = "sync"
 BUFFERED = "buffered"
 STALENESS = "staleness"
 
-
 @dataclass
 class ClientUpdate:
     """One client's contribution, tagged with the global version it started from."""
@@ -62,7 +21,6 @@ class ClientUpdate:
     parameters: NDArrays
     num_examples: int
     base_version: int  # global version this client pulled before training
-
 
 @dataclass
 class BufferedAsyncAggregator:
@@ -159,7 +117,6 @@ class BufferedAsyncAggregator:
             "mean_staleness": float(np.mean(sl)) if sl else 0.0,
             "max_staleness": int(np.max(sl)) if sl else 0,
         }
-
 
 # ---------------------------------------------------------------------------
 # Flower wrapper.

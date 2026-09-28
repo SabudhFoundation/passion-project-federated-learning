@@ -1,22 +1,8 @@
-"""
-Flower ServerApp  —  Board item 1.
-
-Two strategies are selectable:
-  "fedavg"   -> stock Flower FedAvg. Use this FIRST, to prove parity with Phase 1.
-  "buffered" -> our semi-async buffered aggregator (board item 4).
-
-Parity gate
------------
-Do not touch the async path until `strategy="fedavg"` reproduces Phase 1:
-    STGAT+GCN  MAE 3.7010, RMSE 4.6809, R^2 0.9797
-If the numbers drift, the bug is in the port (most likely the state_dict <-> ndarray
-ordering, or the parameter clamp being applied in a different place), not in Flower.
-"""
+"""Flower server: FedAvg or buffered-async strategy selection."""
 
 from __future__ import annotations
 
 from typing import Dict, List, Tuple
-
 
 def weighted_average(metrics: List[Tuple[int, Dict]]) -> Dict:
     """Aggregate client eval metrics weighted by example count."""
@@ -25,7 +11,6 @@ def weighted_average(metrics: List[Tuple[int, Dict]]) -> Dict:
     total = sum(n for n, _ in metrics)
     keys = [k for k in metrics[0][1] if isinstance(metrics[0][1][k], (int, float))]
     return {k: sum(n * m[k] for n, m in metrics) / total for k in keys}
-
 
 def build_server_app(
     num_rounds: int = 100,

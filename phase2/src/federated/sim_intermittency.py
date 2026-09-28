@@ -1,45 +1,5 @@
-"""
-Intermittent-connectivity simulation: FedAvg vs buffered async vs staleness-weighted.
-
-Board item 4. This is the experiment that produces the plot.
-
-Method
-------
-IoT roadside units drop off the network. We do not need real flaky hardware to
-study that - we need a controlled availability trace. Each client is available
-in each round with probability p, independently. We sweep p from 1.0 down to
-0.25 and measure how each aggregation mode degrades.
-
-  SYNC (FedAvg, Phase 1 behaviour)
-      The server waits for every sampled client. If any client is offline the
-      round cannot close, so the round is lost. This is the cost of synchrony
-      under intermittency and it compounds fast: with 4 clients at p=0.7, all
-      four are present only 0.7^4 = 24% of the time.
-
-  BUFFERED (FedBuff-style)
-      Aggregate as soon as K of N updates arrive. Offline clients no longer
-      block progress; their updates land later and roll into a later
-      aggregation.
-
-  STALENESS
-      As BUFFERED, but an update computed against global version v and applied
-      at version v' is discounted by (1 + v' - v)^(-alpha), so stale gradients
-      do not drag the global model backwards.
-
-Task
-----
-Deliberately a small federated ridge-regression problem, not the STGNN. The
-question here is "does the aggregation scheme survive dropout", which is a
-property of the aggregator, not of the model. Keeping the task tiny means this
-runs in seconds on a laptop, has no dataset dependency, and isolates the one
-variable we care about. The same aggregator object is what plugs into Flower
-for the real STGNN runs.
-
-Non-IID split: each client's feature distribution is shifted and rescaled, so
-client optima genuinely disagree and naive aggregation can hurt.
-
-Run:  python -m src.federated.sim_intermittency
-"""
+"""Compare FedAvg, buffered async, and staleness-weighted aggregation
+under client dropout, on a small non-IID regression task."""
 
 from __future__ import annotations
 
@@ -63,7 +23,6 @@ N_ROUNDS = 120
 LOCAL_STEPS = 5
 LOCAL_LR = 0.05
 
-
 def make_federation(seed: int = 0):
     """Non-IID clients sharing one ground-truth mapping."""
     rng = np.random.default_rng(seed)
@@ -81,9 +40,8 @@ def make_federation(seed: int = 0):
     yt = Xt @ w_true + rng.normal(scale=0.1, size=N_TEST)
     return clients, (Xt, yt), w_true
 
-
 def local_train(w: np.ndarray, X: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """A few SGD steps on local data — the analogue of client.fit()."""
+    """A few SGD steps on local data, the analogue of client.fit()."""
     w = w.copy()
     n = len(y)
     for _ in range(LOCAL_STEPS):
@@ -93,11 +51,9 @@ def local_train(w: np.ndarray, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         w -= LOCAL_LR * grad / (1.0 + np.linalg.norm(grad))  # normalised step
     return w
 
-
 def test_mse(w: np.ndarray, test) -> float:
     Xt, yt = test
     return float(np.mean((Xt @ w - yt) ** 2))
-
 
 def run(mode: str, availability: float, seed: int = 0) -> dict:
     """One full federated run under a given availability probability."""
@@ -159,7 +115,6 @@ def run(mode: str, availability: float, seed: int = 0) -> dict:
     )
     return s
 
-
 def sweep(seeds=(0, 1, 2)):
     availabilities = [1.0, 0.9, 0.75, 0.5, 0.25]
     modes = [SYNC, BUFFERED, STALENESS]
@@ -177,13 +132,11 @@ def sweep(seeds=(0, 1, 2)):
             }
     return availabilities, modes, results
 
-
 LABEL = {
     SYNC: "FedAvg (sync)",
     BUFFERED: "Buffered async",
     STALENESS: "Buffered + staleness",
 }
-
 
 def main():
     availabilities, modes, res = sweep()
@@ -217,7 +170,7 @@ def main():
         print(row)
 
     print()
-    print("Rounds lost to stragglers (sync only — async never stalls)")
+    print("Rounds lost to stragglers (sync only, async never stalls)")
     print()
     print(header)
     print("-" * len(header))
@@ -227,7 +180,6 @@ def main():
             row += f"{res[(mode, p)]['lost_rounds']:>11.0f}"
         print(row)
 
-    # Headline number for the meeting.
     p_bad = 0.5
     sync_bad = res[(SYNC, p_bad)]["final_mse"]
     stale_bad = res[(STALENESS, p_bad)]["final_mse"]
@@ -240,7 +192,6 @@ def main():
         print(f"  -> {(1 - stale_bad / sync_bad) * 100:.1f}% lower error from async aggregation")
     print("=" * 78)
     print()
-    print("READ THE CAVEATS BEFORE QUOTING THE HEADLINE NUMBER:")
     print()
     print("  1. The sync baseline is modelled strictly: a round is LOST if any")
     print("     sampled client is offline. That is textbook FedAvg, and it is why")
@@ -254,7 +205,6 @@ def main():
     print(f"     {buf_bad:.4f} for plain buffered). Expected: this task is convex")
     print("     and the clients agree closely enough that stale updates are not")
     print("     harmful. Staleness discounting should start to matter on the real")
-    print("     non-IID PeMS split with the STGNN. Report it as untested-benefit,")
     print("     not as a win.")
     print()
     print("  3. This is ridge regression, not the STGNN. It isolates the")
@@ -268,7 +218,6 @@ def main():
         print(f"(plot skipped: {exc})")
 
     return res
-
 
 def _plot(availabilities, modes, res):
     import matplotlib
@@ -313,7 +262,6 @@ def _plot(availabilities, modes, res):
     os.makedirs("results", exist_ok=True)
     fig.savefig(out, dpi=150)
     print(f"Plot written to {out}")
-
 
 if __name__ == "__main__":
     main()

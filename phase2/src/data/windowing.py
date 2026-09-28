@@ -1,29 +1,4 @@
-"""
-Windowing, chronological split, and scaling for per-district traffic tensors.
-
-This is the missing layer between Revanth's preprocessing and the Flower client.
-His pipeline saves each district as flow.npz with a tensor of shape
-
-    (timesteps, nodes, features)     # features = flow + temporal encodings
-
-but stops there. The model needs sliding windows: given the last L time-steps,
-predict the next H. This module does exactly that, leakage-free.
-
-Pure numpy on purpose — no torch — so it can be unit-tested anywhere and reused
-outside the training stack. The torch DataLoader wrapper lives in district_data.py.
-
-Design decisions (state these if asked):
-- Split is CHRONOLOGICAL (train = earliest, then val, then test). Traffic is a time
-  series; shuffling would leak the future into the past.
-- The scaler is fit on the TRAIN span only, then applied to val/test. Fitting on all
-  data is the classic leakage bug.
-- Windows are built WITHIN each split, so no single window straddles a split
-  boundary.
-- Only the flow channel (channel 0) is standardised and predicted. The temporal
-  feature channels are already bounded encodings from Revanth's pipeline, so they're
-  passed through untouched. Predictions are inverse-transformed before metrics, so
-  MAE / RMSE come out in real traffic units and are comparable to Phase 1.
-"""
+"""Windowing, chronological split, and scaling for a district traffic tensor."""
 
 from __future__ import annotations
 
@@ -34,7 +9,6 @@ import numpy as np
 LOOKBACK = 12   # Phase 1 config: 12 time-steps in
 HORIZON = 5     # Phase 1 config: 5 time-steps out
 TARGET_CHANNEL = 0  # channel 0 is traffic flow, the thing we forecast
-
 
 @dataclass
 class Scaler:
@@ -55,7 +29,6 @@ class Scaler:
         std = float(np.std(flow_channel)) or 1.0  # guard against a constant span
         return cls(mean=mean, std=std)
 
-
 def chronological_split(T: int, train=0.7, val=0.15):
     """Return (train_slice, val_slice, test_slice) over the time axis."""
     n_train = int(T * train)
@@ -65,7 +38,6 @@ def chronological_split(T: int, train=0.7, val=0.15):
         slice(n_train, n_train + n_val),
         slice(n_train + n_val, T),
     )
-
 
 def make_windows(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
                  target_channel=TARGET_CHANNEL):
@@ -90,7 +62,6 @@ def make_windows(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
         # horizon flow, transposed to (N, horizon)
         Y[i] = flow[i + lookback : i + lookback + horizon].T
     return X, Y
-
 
 def prepare_district(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
                      train=0.7, val=0.15, target_channel=TARGET_CHANNEL):

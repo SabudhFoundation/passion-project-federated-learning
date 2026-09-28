@@ -1,26 +1,4 @@
-"""
-Load Revanth's per-district NPZ output and turn it into per-client training data.
-
-Revanth's preprocessing saves, per district:
-    flow.npz       -> key "tensor",    shape (timesteps, nodes, features)
-    adjacency.npz  -> key "adjacency", shape (nodes, nodes)
-    metadata.npz, info.json  (not needed for training)
-
-In our federated setup, ONE district = ONE client. That's the clean, consistent
-client split we agreed to build fresh (the old team snippets that split into 5
-clients were inconsistent, per Revanth's review).
-
-Note on differing node counts: districts have different numbers of sensors. That's
-fine here. The model's parameters (GAT/GCN/GRU/head weights) are node-independent —
-they're shared across nodes and don't depend on N. Only the adjacency matrix, which
-is passed in as data (not a learned parameter), is N x N. So all clients share one
-global model under FedAvg while each feeds its own adjacency. Worth stating in the
-meeting: it's why district-as-client works without padding every district to the
-same size.
-
-torch is imported lazily so the pure-numpy path (windowing/split/scaler) stays
-testable without the ML stack installed.
-"""
+"""Load per-district NPZ files and build per-client datasets and adjacency."""
 
 from __future__ import annotations
 
@@ -32,7 +10,6 @@ from .windowing import HORIZON, LOOKBACK, prepare_district
 
 FLOW_KEY = "tensor"
 ADJ_KEY = "adjacency"
-
 
 def load_district_arrays(district_dir: str | Path):
     """Read one district's flow tensor and adjacency from Revanth's NPZ files."""
@@ -51,13 +28,11 @@ def load_district_arrays(district_dir: str | Path):
         )
     return tensor, adj
 
-
 def _find(d: Path, names):
     for n in names:
         if (d / n).exists():
             return d / n
     raise FileNotFoundError(f"none of {names} found in {d}")
-
 
 def normalise_adjacency(adj: np.ndarray) -> np.ndarray:
     """D^-1/2 (A + I) D^-1/2, in numpy. Mirrors the torch helper in stgnn.py."""
@@ -67,7 +42,6 @@ def normalise_adjacency(adj: np.ndarray) -> np.ndarray:
     nz = deg > 0
     dinv[nz] = deg[nz] ** -0.5
     return dinv[:, None] * a * dinv[None, :]
-
 
 def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON):
     """Numpy-only. Returns a list of per-client dicts (no torch needed).
@@ -100,7 +74,6 @@ def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON):
             }
         )
     return clients
-
 
 # ---------------------------------------------------------------------------
 # torch layer (lazy import). Turns the numpy arrays above into DataLoaders and

@@ -1,16 +1,4 @@
-"""
-Taylor-KAN vs B-spline KAN — parameter budget.
-
-Board item 3. Run:  python demo_taylor_kan.py
-
-Uses the exact Phase 1 KAN configuration from the repo README:
-    hidden layers [128, 128, 64], grid_size 8, spline_order 3
-feeding from GRU hidden 128 into a 5-step forecast horizon.
-
-The analytic counts need only Python. If torch is installed the script also
-instantiates the real layer and checks the analytic count against the actual
-parameter tensors, plus a quick numerical-stability check.
-"""
+"""Compare parameter counts of the B-spline KAN head vs the Taylor KAN head."""
 
 import sys
 
@@ -31,14 +19,11 @@ LAYERS = [GRU_HIDDEN, *KAN_HIDDEN, HORIZON]
 FC_HIDDEN = 128
 FC_PARAMS = (GRU_HIDDEN * FC_HIDDEN + FC_HIDDEN) + (FC_HIDDEN * HORIZON + HORIZON)
 
-
 def fmt(n: int) -> str:
     return f"{n:,}"
 
-
 def kb(n: int, bytes_per: int = 4) -> float:
     return n * bytes_per / 1024
-
 
 def main():
     print()
@@ -83,12 +68,10 @@ def main():
     print("  Phase 1 attributed STGAT+GCN's win over GNN-GRU-KAN to 'lower parameter")
     print("  complexity' and 'reduced sensitivity to client-side model divergence'.")
     print()
-    print("  BE HONEST ABOUT WHAT THIS DOES AND DOESN'T CLOSE:")
     print(f"    B-spline KAN {fmt(bspline):>10}   =  {bspline / FC_PARAMS:5.1f}x the FC head")
     print(f"    Taylor  p=2  {fmt(t2):>10}   =  {t2 / FC_PARAMS:5.1f}x the FC head")
     print(f"    Taylor  p=1  {fmt(taylor_kan_params(LAYERS, 1)):>10}   =  "
           f"{taylor_kan_params(LAYERS, 1) / FC_PARAMS:5.1f}x the FC head")
-    print(f"    FC head      {fmt(FC_PARAMS):>10}   =    1.0x  (Phase 1 winner)")
     print()
     print("  Taylor-KAN removes ~2/3 of the KAN head's parameters, but it is still")
     print("  roughly an order of magnitude heavier than the FC head. So this alone")
@@ -98,19 +81,17 @@ def main():
     print("  under FedAvg, or whether KAN's learnable activations start paying for")
     print("  themselves once the parameter count drops. Shrinking the KAN hidden")
     print("  layers from [128,128,64] is the other lever, and it is untested.")
-    print("  That is the Phase 2 experiment — an open question, not a foregone win.")
     print("=" * 74)
     print()
 
     _torch_check()
-
 
 def _torch_check():
     try:
         import torch
         from src.models.taylor_kan import TaylorKAN
     except ImportError:
-        print("(torch not installed — analytic counts only.")
+        print("(torch not installed, analytic counts only.")
         print(" `pip install torch` to also verify against real tensors.)")
         print()
         return
@@ -142,7 +123,6 @@ def _torch_check():
     print()
     print("  RESULT:", "all checks passed" if ok else "CHECKS FAILED")
     print()
-
 
 if __name__ == "__main__":
     main()

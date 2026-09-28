@@ -1,28 +1,4 @@
-"""
-End-to-end federated run over districts: FedAvg across clients, FC head vs Taylor-KAN.
-
-This is the script that ties everything together and actually TRAINS. It needs torch,
-so it runs on your machine, not in the notebook sandbox. It uses the synthetic
-districts by default so it runs today; swap --data for a real LargeST folder when
-Revanth's data lands and nothing else changes.
-
-What it does:
-  1. Loads every district as a client (data_synth/district_* by default).
-  2. Builds one global STGNN model with the chosen head (fc or taylor).
-  3. Runs FedAvg: each client trains locally on its own district, the server averages
-     the weights, repeat for --rounds rounds. Each client passes its OWN adjacency.
-  4. Reports MAE / RMSE / R2 per round on each client's val split, in real units.
-
-Why it matters for the tasks:
-  - Task 2 (Flower deployment): proves the client/server/data wiring runs end to end.
-  - Task 3 (testing): the same metrics harness that will check parity on real data.
-  - Task 4 (Taylor-KAN): `--head taylor` vs `--head fc` is the head-to-head that tests
-    whether the smaller Taylor head trains competitively under FedAvg.
-
-Run:
-    python run_federated_local.py --head fc     --rounds 15
-    python run_federated_local.py --head taylor --rounds 15
-"""
+"""Run FedAvg across districts and compare the FC head vs the Taylor KAN head."""
 
 from __future__ import annotations
 
@@ -31,7 +7,6 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -42,7 +17,6 @@ def get_args():
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--taylor-order", type=int, default=2)
     return p.parse_args()
-
 
 def main():
     args = get_args()
@@ -147,7 +121,6 @@ def main():
 
     print("\nDone. This is the harness that will check parity on the real data:")
     print("target to reproduce from Phase 1 -> MAE 3.70, R2 0.98")
-
 
 if __name__ == "__main__":
     main()

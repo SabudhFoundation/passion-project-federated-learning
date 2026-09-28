@@ -1,23 +1,4 @@
-"""
-Generate synthetic districts in Revanth's exact NPZ format.
-
-Purpose: run and test the whole pipeline (windowing -> split -> scaler -> Flower)
-BEFORE the real LargeST data lands. The moment a real district folder is available,
-point the loader at it instead and nothing else changes.
-
-Writes, per district, into <out>/district_<id>/ :
-    flow.npz        key "tensor",    shape (T, N, F)
-    adjacency.npz   key "adjacency", shape (N, N)
-    info.json       shape summary (mirrors Revanth's info file)
-
-The synthetic traffic has a daily sine rhythm plus neighbour coupling along a random
-sparse road graph, so it is non-trivial to forecast and non-IID across districts
-(each district gets a different node count, rhythm, and noise level) — like real
-regions. Feature channel 0 is flow; channels 1..F-1 are time-of-day / day-of-week
-encodings, matching how Revanth's tensor is laid out.
-
-Run:  python scripts/make_synthetic_districts.py
-"""
+"""Generate synthetic districts in the preprocessing NPZ format for testing."""
 
 from __future__ import annotations
 
@@ -35,7 +16,6 @@ STEPS_PER_DAY = 96      # 15-min sampling -> 96 steps/day
 N_FEATURES = 6
 RNG = np.random.default_rng(42)
 
-
 def random_adjacency(n, avg_degree=4):
     """Sparse symmetric 0/1 adjacency, no self loops."""
     A = np.zeros((n, n), dtype=np.float32)
@@ -45,7 +25,6 @@ def random_adjacency(n, avg_degree=4):
             if i != j:
                 A[i, j] = A[j, i] = 1.0
     return A
-
 
 def synth_district(n_nodes, seed):
     rng = np.random.default_rng(seed)
@@ -83,7 +62,6 @@ def synth_district(n_nodes, seed):
     tensor[:, :, 5] = month[:, None]
     return tensor, A
 
-
 def main():
     OUT.mkdir(exist_ok=True)
     node_counts = RNG.integers(15, 35, size=N_DISTRICTS)  # non-uniform, like real districts
@@ -108,7 +86,6 @@ def main():
 
     print(f"\n{N_DISTRICTS} synthetic districts written under {OUT}/")
     print("Point the loader at these to run the pipeline before real data arrives.")
-
 
 if __name__ == "__main__":
     main()

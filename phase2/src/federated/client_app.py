@@ -1,29 +1,4 @@
-"""
-Flower ClientApp  —  Board item 1: "Develop the Fed environment - Flower.AI"
-
-This replaces the hand-rolled FedAvg loop currently living inside
-notebooks/Finalized_Model_GRU.ipynb.
-
-What carries over from Phase 1, deliberately
---------------------------------------------
-  - AdamW, lr 1e-3, weight_decay 1e-4
-  - Huber loss
-  - gradient clipping at 1.0
-  - parameter clamping to [-2, 2]
-
-The clamp is unusual. It is in the Phase 1 config and it strongly suggests the
-manual loop had divergence problems. It is kept here so the Flower port is a
-true like-for-like, but it is flagged as `PARAM_CLAMP` below: once Flower parity
-is confirmed, try removing it and see whether the divergence was actually a bug
-in the manual aggregation rather than a property of the model.
-
-Parity acceptance test
-----------------------
-Flower + FedAvg must reproduce Phase 1 test metrics within noise:
-    STGAT+GCN -> MAE 3.7010, RMSE 4.6809, R^2 0.9797
-If it does not, the port is wrong. Do not move on to async or Taylor-KAN until
-this passes.
-"""
+"""Flower client: local training and evaluation for the STGNN."""
 
 from __future__ import annotations
 
@@ -39,7 +14,6 @@ from ..models.stgnn import STGNN
 GRAD_CLIP = 1.0
 PARAM_CLAMP = 2.0  # Phase 1 carry-over; revisit after parity is confirmed
 
-
 # ---------------------------------------------------------------------------
 # Parameter <-> ndarray plumbing. Flower speaks lists of numpy arrays.
 # ---------------------------------------------------------------------------
@@ -47,14 +21,12 @@ PARAM_CLAMP = 2.0  # Phase 1 carry-over; revisit after parity is confirmed
 def get_parameters(model: nn.Module) -> List[np.ndarray]:
     return [p.cpu().numpy() for p in model.state_dict().values()]
 
-
 def set_parameters(model: nn.Module, parameters: List[np.ndarray]) -> None:
     keys = list(model.state_dict().keys())
     state = OrderedDict(
         {k: torch.tensor(v) for k, v in zip(keys, parameters)}
     )
     model.load_state_dict(state, strict=True)
-
 
 # ---------------------------------------------------------------------------
 # Local training / evaluation.
@@ -91,7 +63,6 @@ def train_one_client(
             n_batches += 1
     return total / max(1, n_batches)
 
-
 @torch.no_grad()
 def evaluate_one_client(
     model: nn.Module,
@@ -126,7 +97,6 @@ def evaluate_one_client(
         "rmse": float(np.sqrt(mse)),
         "r2": r2,
     }
-
 
 # ---------------------------------------------------------------------------
 # Flower ClientApp. Lazy import so this module is usable without flwr.

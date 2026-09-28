@@ -1,19 +1,4 @@
-"""
-Verify the data pipeline end to end, in pure numpy (no torch needed).
-
-This is the proof that the windowing / split / scaler layer is correct BEFORE we
-have real data or a GPU. It generates synthetic districts, runs them through the
-loader, and asserts the things that actually matter:
-
-  1. Shapes match the model contract: X = (num, lookback, N, F), Y = (num, N, horizon)
-  2. The split is chronological and roughly 70/15/15
-  3. No leakage: the scaler is fit on train only (train flow ~ mean 0 / std 1,
-     val and test are NOT forced to mean 0 -- they inherit the train scaling)
-  4. Inverse-transform recovers real units
-  5. Different districts can have different node counts and still load
-
-Run:  python verify_data_pipeline.py
-"""
+"""Check the data pipeline on synthetic districts."""
 
 import subprocess
 import sys
@@ -37,12 +22,10 @@ print("=" * 68)
 
 all_ok = True
 
-
 def check(label, cond):
     global all_ok
     all_ok = all_ok and bool(cond)
     print(f"  [{'PASS' if cond else 'FAIL'}] {label}")
-
 
 for c in clients:
     N, F = c["n_nodes"], c["n_features"]
