@@ -219,3 +219,5 @@ Temporary Items/
 .env
 __pycache__/
 *.pyc
+
+data_synth/

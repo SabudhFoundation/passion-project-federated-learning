@@ -63,8 +63,9 @@ def normalise_adjacency(adj: np.ndarray) -> np.ndarray:
     """D^-1/2 (A + I) D^-1/2, in numpy. Mirrors the torch helper in stgnn.py."""
     a = adj + np.eye(adj.shape[0], dtype=adj.dtype)
     deg = a.sum(1)
-    dinv = np.power(deg, -0.5, where=deg > 0)
-    dinv[np.isinf(dinv)] = 0.0
+    dinv = np.zeros_like(deg)
+    nz = deg > 0
+    dinv[nz] = deg[nz] ** -0.5
     return dinv[:, None] * a * dinv[None, :]
 
 
