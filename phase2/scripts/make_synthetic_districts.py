@@ -49,18 +49,24 @@ def synth_district(n_nodes, seed):
     flow += rng.normal(scale=rng.uniform(2, 6), size=flow.shape)  # district-specific noise
     flow = np.clip(flow, 0, None)
 
-    # Assemble (T, N, 6) matching Revanth's exact channel order:
-    # ch0 flow, ch1 tod_sin, ch2 tod_cos, ch3 dow_sin, ch4 dow_cos, ch5 month
+    # Standardise the flow channel (z-score), like the real pipeline does, and
+    # keep the mean/std so we can store them in info.json for inversion.
+    fmean = float(flow.mean())
+    fstd = float(flow.std()) or 1.0
+    flow_std = (flow - fmean) / fstd
+
+    # Assemble (T, N, 6) matching the real channel order:
+    # ch0 flow(standardised), ch1 tod_sin, ch2 tod_cos, ch3 dow_sin, ch4 dow_cos, ch5 month
     dow7 = ((t // STEPS_PER_DAY) % 7) / 7.0
     month = (((t // (STEPS_PER_DAY * 30)) % 12) + 1) / 12.0  # rough month proxy
     tensor = np.empty((T, n_nodes, N_FEATURES), dtype=np.float32)
-    tensor[:, :, 0] = flow
+    tensor[:, :, 0] = flow_std
     tensor[:, :, 1] = np.sin(2 * np.pi * tod)[:, None]
     tensor[:, :, 2] = np.cos(2 * np.pi * tod)[:, None]
     tensor[:, :, 3] = np.sin(2 * np.pi * dow7)[:, None]
     tensor[:, :, 4] = np.cos(2 * np.pi * dow7)[:, None]
     tensor[:, :, 5] = month[:, None]
-    return tensor, A
+    return tensor, fmean, fstd
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -68,24 +74,33 @@ def main():
 
     for d in range(N_DISTRICTS):
         n = int(node_counts[d])
-        tensor, adj = synth_district(n, seed=100 + d)
+        tensor, fmean, fstd = synth_district(n, seed=100 + d)
+
+        # Fake sensor coordinates so the loader builds adjacency from them,
+        # exactly like it will for the real data (which has no adjacency file).
+        rng = np.random.default_rng(200 + d)
+        lat = 34.0 + rng.uniform(-0.3, 0.3, size=n)
+        lng = -118.0 + rng.uniform(-0.3, 0.3, size=n)
 
         dd = OUT / f"district_{d}"
         dd.mkdir(exist_ok=True)
-        np.savez_compressed(dd / "flow.npz", tensor=tensor)
-        np.savez_compressed(dd / "adjacency.npz", adjacency=adj)
+        # Match the real output file names and layout (no adjacency file).
+        np.savez_compressed(dd / "flow_temporal.npz", data=tensor)
+        np.savez_compressed(dd / "metadata.npz", lat=lat, lng=lng)
         info = {
             "district": d,
             "timesteps": int(tensor.shape[0]),
             "nodes": int(tensor.shape[1]),
             "features": int(tensor.shape[2]),
+            "feature_names": ["flow", "tod_sin", "tod_cos", "dow_sin", "dow_cos", "month"],
+            "flow_normalization": {"mean": fmean, "std": fstd},
             "synthetic": True,
         }
         (dd / "info.json").write_text(json.dumps(info, indent=2))
-        print(f"wrote {dd}  tensor={tensor.shape}  adj={adj.shape}")
+        print(f"wrote {dd}  tensor={tensor.shape}  (adjacency built from coords)")
 
     print(f"\n{N_DISTRICTS} synthetic districts written under {OUT}/")
-    print("Point the loader at these to run the pipeline before real data arrives.")
+    print("Same file layout as the real LargeST output (flow_temporal.npz + metadata.npz + info.json).")
 
 if __name__ == "__main__":
     main()

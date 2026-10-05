@@ -64,19 +64,27 @@ def make_windows(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
     return X, Y
 
 def prepare_district(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
-                     train=0.7, val=0.15, target_channel=TARGET_CHANNEL):
+                     train=0.7, val=0.15, target_channel=TARGET_CHANNEL,
+                     scaler: "Scaler | None" = None):
     """Full pipeline for one district tensor.
 
-    Returns a dict with windowed, scaled X/Y for each split plus the fitted scaler.
-    Scaler is fit on the train span's flow channel only.
+    Returns a dict with windowed X/Y for each split plus the scaler used.
+
+    If `scaler` is None, the flow channel is standardised here, fitting on the
+    train span only (used for raw synthetic data). If a scaler is passed, the flow
+    is assumed already standardised upstream (Revanth's pipeline z-scores it and
+    stores mean/std in info.json), so we do NOT re-standardise, we just carry the
+    scaler for inverse-transform to real traffic units at metric time.
     """
     T = tensor.shape[0]
     tr, va, te = chronological_split(T, train, val)
 
-    # Fit scaler on train flow only, then standardise the flow channel everywhere.
-    scaler = Scaler.fit(tensor[tr][:, :, target_channel])
-    scaled = tensor.copy().astype(np.float32)
-    scaled[:, :, target_channel] = scaler.transform(scaled[:, :, target_channel])
+    scaled = tensor.astype(np.float32)
+    if scaler is None:
+        scaler = Scaler.fit(tensor[tr][:, :, target_channel])
+        scaled = scaled.copy()
+        scaled[:, :, target_channel] = scaler.transform(scaled[:, :, target_channel])
+    # else: data already standardised upstream, leave values as-is.
 
     out = {"scaler": scaler}
     for name, sl in (("train", tr), ("val", va), ("test", te)):
