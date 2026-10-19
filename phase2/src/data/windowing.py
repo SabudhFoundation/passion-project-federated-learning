@@ -63,6 +63,56 @@ def make_windows(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
         Y[i] = flow[i + lookback : i + lookback + horizon].T
     return X, Y
 
+@dataclass
+class LazyWindows:
+    """Indexes sliding windows on the fly instead of materialising them all.
+
+    Holds one reference to the scaled (T, N, F) tensor and a list of window start
+    positions. Window i is cut only when requested. Memory is O(tensor), not
+    O(num_windows x lookback x N x F), which is what lets the full year of
+    480-sensor 5-min data fit (materialising every window would be ~14 GB).
+    """
+
+    tensor: np.ndarray        # scaled (T, N, F)
+    starts: np.ndarray        # valid window start indices within this split
+    lookback: int
+    horizon: int
+    target_channel: int
+
+    def __len__(self):
+        return len(self.starts)
+
+    def get(self, i):
+        s = int(self.starts[i])
+        X = self.tensor[s : s + self.lookback]                                  # (L, N, F)
+        y = self.tensor[s + self.lookback : s + self.lookback + self.horizon,
+                        :, self.target_channel]                                 # (H, N)
+        return X.astype(np.float32), y.T.astype(np.float32)                     # X, (N, H)
+
+
+def prepare_district_lazy(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
+                          train=0.7, val=0.15, target_channel=TARGET_CHANNEL,
+                          scaler: "Scaler | None" = None):
+    """Same scaling/splitting as prepare_district, but returns LazyWindows
+    (no per-window materialisation). Use this for large real districts."""
+    T = tensor.shape[0]
+    tr, va, te = chronological_split(T, train, val)
+
+    scaled = tensor.astype(np.float32)
+    if scaler is None:
+        scaler = Scaler.fit(tensor[tr][:, :, target_channel])
+        scaled = scaled.copy()
+        scaled[:, :, target_channel] = scaler.transform(scaled[:, :, target_channel])
+
+    out = {"scaler": scaler}
+    for name, sl in (("train", tr), ("val", va), ("test", te)):
+        span = scaled[sl]                       # view into the one scaled tensor
+        n = span.shape[0] - lookback - horizon + 1
+        starts = np.arange(max(0, n))
+        out[name] = LazyWindows(span, starts, lookback, horizon, target_channel)
+    return out
+
+
 def prepare_district(tensor: np.ndarray, lookback=LOOKBACK, horizon=HORIZON,
                      train=0.7, val=0.15, target_channel=TARGET_CHANNEL,
                      scaler: "Scaler | None" = None):

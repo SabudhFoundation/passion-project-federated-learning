@@ -32,7 +32,7 @@ def main():
         raise SystemExit(f"no district_* folders under {args.data} "
                          f"(run scripts/make_synthetic_districts.py first)")
 
-    clients_np = prepare_all_districts(dirs)
+    clients_np = prepare_all_districts(dirs, lazy=True)  # lazy keeps memory flat on real data
     partitions, adjacencies = build_torch_partitions(clients_np, args.batch_size)
     n_features = clients_np[0]["n_features"]
 

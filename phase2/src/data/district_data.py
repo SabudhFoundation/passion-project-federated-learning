@@ -17,7 +17,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .windowing import HORIZON, LOOKBACK, Scaler, prepare_district
+from .windowing import (
+    HORIZON,
+    LOOKBACK,
+    Scaler,
+    prepare_district,
+    prepare_district_lazy,
+)
 
 # File-name candidates (handles both Revanth's output and the synthetic test data).
 FLOW_FILES = ("flow_temporal.npz", "flow.npz", "flow_tensor.npz")
@@ -153,12 +159,18 @@ def normalise_adjacency(adj: np.ndarray) -> np.ndarray:
     return dinv[:, None] * a * dinv[None, :]
 
 
-def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON):
-    """Numpy-only. Returns a list of per-client dicts (no torch needed)."""
+def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON, lazy=False):
+    """Numpy-only. Returns a list of per-client dicts (no torch needed).
+
+    lazy=False materialises all windows (fine for small/synthetic data).
+    lazy=True returns LazyWindows that cut windows on demand (use for the real
+    full-size districts, which would otherwise need ~14 GB of RAM).
+    """
+    prep_fn = prepare_district_lazy if lazy else prepare_district
     clients = []
     for dd in district_dirs:
         tensor, adj, scaler = load_district(dd)
-        prep = prepare_district(tensor, lookback, horizon, scaler=scaler)
+        prep = prep_fn(tensor, lookback, horizon, scaler=scaler)
         clients.append(
             {
                 "name": Path(dd).name,
@@ -180,13 +192,33 @@ def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON):
 # ---------------------------------------------------------------------------
 
 def build_torch_partitions(clients, batch_size=64):
-    """Returns (partitions, adjacencies), both index-aligned with `clients`."""
+    """Returns (partitions, adjacencies), both index-aligned with `clients`.
+
+    Handles both materialised splits ((X, Y) arrays) and LazyWindows (which cut
+    each window on demand, keeping memory flat for large districts).
+    """
     import torch
-    from torch.utils.data import DataLoader, TensorDataset
+    from torch.utils.data import DataLoader, Dataset, TensorDataset
+
+    from .windowing import LazyWindows
+
+    class LazyDataset(Dataset):
+        def __init__(self, lw: LazyWindows):
+            self.lw = lw
+
+        def __len__(self):
+            return len(self.lw)
+
+        def __getitem__(self, i):
+            X, Y = self.lw.get(i)
+            return torch.from_numpy(X), torch.from_numpy(Y)
 
     def loader(split, shuffle):
-        X, Y = split
-        ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(Y))
+        if isinstance(split, LazyWindows):
+            ds = LazyDataset(split)
+        else:
+            X, Y = split
+            ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(Y))
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
 
     partitions, adjacencies = [], []
