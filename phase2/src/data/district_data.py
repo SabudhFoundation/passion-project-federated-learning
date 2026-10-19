@@ -45,14 +45,27 @@ def _pick_3d_array(npz):
 
 
 def _read_latlng(meta_npz):
-    """Pull lat/lng arrays from metadata.npz, trying common key names."""
+    """Pull lat/lng from metadata.npz.
+
+    Handles two layouts:
+      (a) separate arrays keyed 'lat'/'lng' (or similar), or
+      (b) a static-feature matrix (N, F) where the first two columns are
+          lat/lng (the LargeST pipeline's metadata 'features' matrix:
+          [lat_normalized, lng_normalized, lanes, dir_N, dir_S, dir_E, dir_W]).
+    """
     keys = {k.lower(): k for k in meta_npz.files}
     lat_k = next((keys[c] for c in ("lat", "latitude", "y") if c in keys), None)
     lng_k = next((keys[c] for c in ("lng", "lon", "long", "longitude", "x") if c in keys), None)
-    if lat_k is None or lng_k is None:
-        return None
-    return (meta_npz[lat_k].astype(np.float64).ravel(),
-            meta_npz[lng_k].astype(np.float64).ravel())
+    if lat_k is not None and lng_k is not None:
+        return (meta_npz[lat_k].astype(np.float64).ravel(),
+                meta_npz[lng_k].astype(np.float64).ravel())
+
+    # Fallback: a 2D feature matrix, first two columns are lat/lng.
+    for k in meta_npz.files:
+        a = meta_npz[k]
+        if getattr(a, "ndim", 0) == 2 and a.shape[1] >= 2:
+            return (a[:, 0].astype(np.float64), a[:, 1].astype(np.float64))
+    return None
 
 
 def build_adjacency_from_coords(lat, lng, k=8):
