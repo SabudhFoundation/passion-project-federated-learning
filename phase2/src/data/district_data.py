@@ -98,7 +98,19 @@ def build_adjacency_from_coords(lat, lng, k=8):
     return A
 
 
-def load_district(district_dir: str | Path):
+def resample_tensor(tensor: np.ndarray, factor: int) -> np.ndarray:
+    """Merge every `factor` steps into one (3 turns 5-min data into 15-min).
+    Flow (channel 0) is averaged; time features keep the first step of each block."""
+    if factor <= 1:
+        return tensor
+    T = (tensor.shape[0] // factor) * factor
+    blocks = tensor[:T].reshape(T // factor, factor, *tensor.shape[1:])
+    out = blocks[:, 0].copy()
+    out[..., 0] = blocks[..., 0].mean(axis=1)
+    return out
+
+
+def load_district(district_dir: str | Path, resample: int = 1):
     """Read one district: flow tensor, adjacency, and (if present) the flow scaler.
 
     Returns (tensor, adj, scaler_or_None).
@@ -106,6 +118,7 @@ def load_district(district_dir: str | Path):
     d = Path(district_dir)
 
     tensor = _pick_3d_array(np.load(_find(d, FLOW_FILES)))   # (T, N, F)
+    tensor = resample_tensor(tensor, resample)
     N = tensor.shape[1]
 
     # Adjacency: use a file if present, else build from metadata coordinates.
@@ -159,7 +172,7 @@ def normalise_adjacency(adj: np.ndarray) -> np.ndarray:
     return dinv[:, None] * a * dinv[None, :]
 
 
-def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON, lazy=False):
+def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON, lazy=False, resample=1):
     """Numpy-only. Returns a list of per-client dicts (no torch needed).
 
     lazy=False materialises all windows (fine for small/synthetic data).
@@ -169,7 +182,7 @@ def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON, laz
     prep_fn = prepare_district_lazy if lazy else prepare_district
     clients = []
     for dd in district_dirs:
-        tensor, adj, scaler = load_district(dd)
+        tensor, adj, scaler = load_district(dd, resample=resample)
         prep = prep_fn(tensor, lookback, horizon, scaler=scaler)
         clients.append(
             {

@@ -221,3 +221,7 @@ __pycache__/
 *.pyc
 
 data_synth/
+
+# real LargeST district data (too big for git)
+phase2/data_real/
+phase2/data_hold/
