@@ -1,10 +1,11 @@
 """STGNN model: GAT -> GCN -> GRU -> LayerNorm -> head.
-Dense adjacency (no torch-geometric). Head is 'fc' or 'taylor'."""
+Dense adjacency (no torch-geometric). Head is 'fc', 'taylor' or 'bspline'."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .bspline_kan import BSplineKAN
 from .taylor_kan import TaylorKAN
 
 class DenseGCN(nn.Module):
@@ -55,6 +56,8 @@ class STGNN(nn.Module):
         horizon: int = 5,
         head: str = "fc",
         taylor_order: int = 2,
+        grid_size: int = 8,
+        spline_order: int = 3,
         kan_hidden=(64,),
         fc_dropout: float = 0.1,
     ):
@@ -76,6 +79,9 @@ class STGNN(nn.Module):
 
         if head == "taylor":
             self.head = TaylorKAN([gru_hidden, *kan_hidden, horizon], order=taylor_order)
+        elif head == "bspline":
+            self.head = BSplineKAN([gru_hidden, *kan_hidden, horizon],
+                                   grid_size=grid_size, spline_order=spline_order)
         elif head == "fc":
             h = kan_hidden[0] if kan_hidden else gru_hidden
             self.head = nn.Sequential(

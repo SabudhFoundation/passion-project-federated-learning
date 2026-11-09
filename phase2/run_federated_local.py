@@ -1,4 +1,4 @@
-"""Run FedAvg across districts and compare the FC head vs the Taylor KAN head."""
+"""Run FedAvg across districts and compare the FC, B-spline KAN and Taylor KAN heads."""
 
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ import numpy as np
 def get_args():
     p = argparse.ArgumentParser()
     p.add_argument("--data", default="data_synth", help="folder of district_* subfolders")
-    p.add_argument("--head", choices=["fc", "taylor"], default="fc")
+    p.add_argument("--head", choices=["fc", "taylor", "bspline"], default="fc")
     p.add_argument("--rounds", type=int, default=15)
     p.add_argument("--local-epochs", type=int, default=1)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--taylor-order", type=int, default=2)
+    p.add_argument("--grid-size", type=int, default=8, help="B-spline head only")
+    p.add_argument("--spline-order", type=int, default=3, help="B-spline head only")
     p.add_argument("--device", default="auto", help="auto, cpu or cuda")
     p.add_argument("--out", default="", help="optional path to save round results as json")
     p.add_argument("--resample", type=int, default=1,
@@ -62,6 +64,8 @@ def main():
             in_features=n_features,
             head=args.head,
             taylor_order=args.taylor_order,
+            grid_size=args.grid_size,
+            spline_order=args.spline_order,
             horizon=5,
         ).to(device)
 
