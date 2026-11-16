@@ -20,6 +20,12 @@ def get_args():
     p.add_argument("--taylor-order", type=int, default=2)
     p.add_argument("--grid-size", type=int, default=8, help="B-spline head only")
     p.add_argument("--spline-order", type=int, default=3, help="B-spline head only")
+    p.add_argument("--kan-hidden", type=int, default=64, help="hidden width of every head")
+    p.add_argument("--eval-split", choices=["val", "test"], default="val",
+                   help="split scored after the final round (val is scored every round)")
+    p.add_argument("--mape-min", type=float, default=1.0,
+                   help="MAPE skips targets below this many vehicles (avoids divide by ~0)")
+    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto", help="auto, cpu or cuda")
     p.add_argument("--out", default="", help="optional path to save round results as json")
     p.add_argument("--resample", type=int, default=1,
@@ -39,6 +45,9 @@ def main():
     from src.data.district_data import build_torch_partitions, prepare_all_districts
     from src.models.stgnn import STGNN
 
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
     if args.device == "auto":
         if torch.cuda.is_available():
             device = torch.device("cuda")
@@ -53,7 +62,8 @@ def main():
                          f"(run scripts/make_synthetic_districts.py first)")
 
     clients_np = prepare_all_districts(dirs, lazy=True, resample=args.resample)  # lazy keeps memory flat on real data
-    partitions, adjacencies = build_torch_partitions(clients_np, args.batch_size)
+    partitions, adjacencies, test_loaders = build_torch_partitions(
+        clients_np, args.batch_size, with_test=True)
     adjacencies = [(m.to(device), n.to(device)) for m, n in adjacencies]
     n_features = clients_np[0]["n_features"]
 
@@ -67,6 +77,7 @@ def main():
             grid_size=args.grid_size,
             spline_order=args.spline_order,
             horizon=5,
+            kan_hidden=(args.kan_hidden,),
         ).to(device)
 
     global_model = new_model()
@@ -91,14 +102,61 @@ def main():
                 out = model(xb.to(device), adj_mask, adj_norm)
                 P.append(out.cpu().numpy())
                 T.append(yb.numpy())
-        p = scaler.inverse_transform(np.concatenate(P).ravel())
-        t = scaler.inverse_transform(np.concatenate(T).ravel())
-        mae = float(np.mean(np.abs(p - t)))
-        rmse = float(np.sqrt(np.mean((p - t) ** 2)))
-        ss_res = float(np.sum((t - p) ** 2))
+        # (windows, sensors, horizon) in vehicle counts
+        p = scaler.inverse_transform(np.concatenate(P))
+        t = scaler.inverse_transform(np.concatenate(T))
+        overall = metrics(p.ravel(), t.ravel())
+        steps = []
+        for h in range(p.shape[-1]):
+            steps.append(metrics(p[..., h].ravel(), t[..., h].ravel()))
+        overall["steps"] = steps
+        return overall
+
+    def metrics(p, t):
+        err = p - t
+        mae = float(np.mean(np.abs(err)))
+        rmse = float(np.sqrt(np.mean(err ** 2)))
+        keep = t >= args.mape_min
+        mape = float(np.mean(np.abs(err[keep]) / t[keep]) * 100)
+        ss_res = float(np.sum(err ** 2))
         ss_tot = float(np.sum((t - t.mean()) ** 2))
-        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        return mae, rmse, r2
+        if ss_tot > 0:
+            r2 = 1.0 - ss_res / ss_tot
+        else:
+            r2 = 0.0
+        return {"mae": mae, "rmse": rmse, "mape": mape, "r2": r2}
+
+    def average(results):
+        """Plain average over clients, overall and per forecast step."""
+        out = {}
+        for k in ("mae", "rmse", "mape", "r2"):
+            out[k] = float(np.mean([r[k] for r in results]))
+        steps = []
+        for h in range(len(results[0]["steps"])):
+            step = {}
+            for k in ("mae", "rmse", "mape", "r2"):
+                step[k] = float(np.mean([r["steps"][h][k] for r in results]))
+            steps.append(step)
+        out["steps"] = steps
+        return out
+
+    def score(model, loaders):
+        results = []
+        for ci, loader in enumerate(loaders):
+            adj_mask, adj_norm = adjacencies[ci]
+            results.append(evaluate(model, loader, adj_mask, adj_norm, clients_np[ci]["scaler"]))
+        return average(results)
+
+    def quantized_copy(model):
+        """Copy with the head's weights rounded to int8 (symmetric, per tensor) and back.
+        Simulates sending an 8-bit head; the backbone stays fp32."""
+        q = deepcopy(model)
+        with torch.no_grad():
+            for prm in q.head.parameters():
+                scale = prm.abs().max() / 127.0
+                if scale > 0:
+                    prm.copy_(torch.round(prm / scale).clamp(-127, 127) * scale)
+        return q
 
     global_sd = get_state(global_model)
     history = []
@@ -107,7 +165,7 @@ def main():
     for rnd in range(1, args.rounds + 1):
         local_states, sizes = [], []
 
-        for ci, (train_loader, _) in enumerate(partitions):
+        for ci, (train_loader, _val) in enumerate(partitions):
             model = new_model()
             set_state(model, deepcopy(global_sd))
             adj_mask, adj_norm = adjacencies[ci]
@@ -144,24 +202,52 @@ def main():
         set_state(global_model, global_sd)
 
         # Evaluate the new global model on each client's val split.
-        maes, rmses, r2s = [], [], []
-        for ci, (_, val_loader) in enumerate(partitions):
-            adj_mask, adj_norm = adjacencies[ci]
-            mae, rmse, r2 = evaluate(global_model, val_loader, adj_mask, adj_norm,
-                                     clients_np[ci]["scaler"])
-            maes.append(mae); rmses.append(rmse); r2s.append(r2)
+        val_loaders = [v for _t, v in partitions]
+        r = score(global_model, val_loaders)
         mins = (time.time() - t_start) / 60
-        print(f"round {rnd:2d} | MAE {np.mean(maes):7.3f} | "
-              f"RMSE {np.mean(rmses):7.3f} | R2 {np.mean(r2s):+.3f} | {mins:.1f} min", flush=True)
-        history.append({"round": rnd, "mae": float(np.mean(maes)), "rmse": float(np.mean(rmses)),
-                        "r2": float(np.mean(r2s)), "minutes": round(mins, 2)})
+        print(f"round {rnd:2d} | MAE {r['mae']:7.3f} | RMSE {r['rmse']:7.3f} | "
+              f"MAPE {r['mape']:6.2f}% | R2 {r['r2']:+.3f} | {mins:.1f} min", flush=True)
+        r["round"] = rnd
+        r["minutes"] = round(mins, 2)
+        history.append(r)
+
+    # Final scoring: chosen split, full precision and with an int8 head.
+    if args.eval_split == "test":
+        final_loaders = test_loaders
+    else:
+        final_loaders = [v for _t, v in partitions]
+    final = score(global_model, final_loaders)
+    final_int8 = score(quantized_copy(global_model), final_loaders)
+    print(f"\nfinal ({args.eval_split}) fp32 | MAE {final['mae']:.3f} | RMSE {final['rmse']:.3f} | "
+          f"MAPE {final['mape']:.2f}% | R2 {final['r2']:+.3f}")
+    print(f"final ({args.eval_split}) int8 head | MAE {final_int8['mae']:.3f} | RMSE {final_int8['rmse']:.3f} | "
+          f"MAPE {final_int8['mape']:.2f}% | R2 {final_int8['r2']:+.3f}")
+    for h, s in enumerate(final["steps"]):
+        print(f"  {15 * (h + 1):3d} min | MAE {s['mae']:.3f} | RMSE {s['rmse']:.3f} | "
+              f"MAPE {s['mape']:.2f}% | R2 {s['r2']:+.3f}")
+
+    # Communication: every client uploads the whole model each round.
+    n_total = global_model.n_params()
+    n_head = global_model.head_params()
+    n_clients = len(partitions)
+    comm = {
+        "model_bytes_fp32": n_total * 4,
+        "head_bytes_fp32": n_head * 4,
+        "head_bytes_int8": n_head,
+        "upload_bytes_per_round_fp32": n_total * 4 * n_clients,
+        "upload_bytes_per_round_int8_head": ((n_total - n_head) * 4 + n_head) * n_clients,
+    }
+    print(f"comm | model {comm['model_bytes_fp32'] / 1024:.1f} KB fp32 per client | head "
+          f"{comm['head_bytes_fp32'] / 1024:.1f} KB fp32, {comm['head_bytes_int8'] / 1024:.1f} KB int8")
 
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         with open(args.out, "w") as f:
             json.dump({"args": vars(args), "clients": [c["name"] for c in clients_np],
-                       "head_params": global_model.head_params(),
-                       "total_params": global_model.n_params(), "rounds": history}, f, indent=2)
+                       "head_params": n_head, "total_params": n_total,
+                       "comm": comm, "rounds": history,
+                       "final": {"split": args.eval_split, "fp32": final, "int8_head": final_int8}},
+                      f, indent=2)
         print(f"saved results to {args.out}")
 
     print("\nDone. This is the harness that will check parity on the real data:")

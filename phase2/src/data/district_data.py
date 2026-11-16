@@ -204,7 +204,7 @@ def prepare_all_districts(district_dirs, lookback=LOOKBACK, horizon=HORIZON, laz
 # torch layer (lazy import). Builds DataLoaders + per-client adjacency tensors.
 # ---------------------------------------------------------------------------
 
-def build_torch_partitions(clients, batch_size=64):
+def build_torch_partitions(clients, batch_size=64, with_test=False):
     """Returns (partitions, adjacencies), both index-aligned with `clients`.
 
     Handles both materialised splits ((X, Y) arrays) and LazyWindows (which cut
@@ -234,10 +234,14 @@ def build_torch_partitions(clients, batch_size=64):
             ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(Y))
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
 
-    partitions, adjacencies = [], []
+    partitions, adjacencies, tests = [], [], []
     for c in clients:
         partitions.append((loader(c["train"], True), loader(c["val"], False)))
         adjacencies.append(
             (torch.from_numpy(c["adj_mask"]), torch.from_numpy(c["adj_norm"]))
         )
+        if with_test:
+            tests.append(loader(c["test"], False))
+    if with_test:
+        return partitions, adjacencies, tests
     return partitions, adjacencies
