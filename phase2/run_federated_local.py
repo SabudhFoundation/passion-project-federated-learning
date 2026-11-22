@@ -1,4 +1,5 @@
-"""Run FedAvg across districts and compare the FC, B-spline KAN and Taylor KAN heads."""
+"""Run FedAvg (or traffic-aware aggregation) across districts and compare the FC,
+B-spline KAN and Taylor KAN heads."""
 
 from __future__ import annotations
 
@@ -9,6 +10,14 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
+
+from src.federated.traffic_aggregation import (
+    METRICS,
+    aggregation_weights,
+    client_metrics,
+    metric_matrix,
+    parse_coef,
+)
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -34,6 +43,14 @@ def get_args():
                    help="cap train batches per client per epoch (0 = all)")
     p.add_argument("--max-val-batches", type=int, default=0,
                    help="cap val batches per client when scoring (0 = all)")
+    p.add_argument("--agg", choices=["fedavg", "traffic"], default="fedavg",
+                   help="fedavg = weight by training examples; traffic = Kaur et al. 2026 "
+                        "traffic-aware weights (see README_PHASE2.md)")
+    p.add_argument("--agg-coef", type=parse_coef, default=[1.0] * 6,
+                   help="traffic agg only: alpha,beta,gamma,delta,epsilon,eta of Eq. 14, "
+                        "paired with V,sigma,mu,R,Phi,Psi")
+    p.add_argument("--agg-floor", type=float, default=0.1,
+                   help="traffic agg only: final weight = (1-floor)*traffic + floor*fedavg")
     return p.parse_args()
 
 def main():
@@ -84,7 +101,21 @@ def main():
     print(f"Head={args.head}  |  head params: {global_model.head_params():,}  "
           f"|  total params: {global_model.n_params():,}")
     print(f"Clients: {len(partitions)}  |  rounds: {args.rounds}  |  "
-          f"resample: {args.resample}  |  batch: {args.batch_size}  |  device: {device}\n")
+          f"resample: {args.resample}  |  batch: {args.batch_size}  |  device: {device}  |  "
+          f"agg: {args.agg}\n")
+
+    # Traffic-aware agg: client metrics from the training split only. The training
+    # data is fixed, so the metrics (and weights) are the same every round.
+    agg_info = {"mode": args.agg}
+    if args.agg == "traffic":
+        raw = [client_metrics(c["train"], c["scaler"]) for c in clients_np]
+        Z = metric_matrix(raw)
+        agg_info.update({"coef": args.agg_coef, "floor": args.agg_floor,
+                         "metric_names": list(METRICS), "metrics": Z.tolist()})
+        print("traffic agg metrics (train split): " + "  ".join(f"{m:>9}" for m in METRICS))
+        for c, row in zip(clients_np, Z):
+            print(f"  {c['name']:30}" + "  ".join(f"{v:9.3f}" for v in row))
+        print()
 
     def get_state(m):
         return {k: v.detach().clone() for k, v in m.state_dict().items()}
@@ -189,8 +220,16 @@ def main():
             sizes.append(len(train_loader.dataset))
 
         # FedAvg: example-weighted average of client weights.
+        # Traffic: same weighted average, with weights from the traffic metrics.
         sizes = np.array(sizes, dtype=float)
-        w = sizes / sizes.sum()
+        if args.agg == "traffic":
+            w, parts = aggregation_weights(Z, sizes, args.agg_coef, args.agg_floor)
+            agg_info.update({"normalized": parts["normalized"].tolist(),
+                             "traffic_weights": parts["traffic"].tolist(),
+                             "fedavg_weights": parts["fedavg"].tolist()})
+        else:
+            w = sizes / sizes.sum()
+        print(f"  round {rnd} agg weights: " + " ".join(f"{x:.3f}" for x in w), flush=True)
         new_sd = {}
         for k in global_sd:
             stacked = torch.stack([ls[k].float() for ls in local_states], dim=0)
@@ -209,6 +248,7 @@ def main():
               f"MAPE {r['mape']:6.2f}% | R2 {r['r2']:+.3f} | {mins:.1f} min", flush=True)
         r["round"] = rnd
         r["minutes"] = round(mins, 2)
+        r["agg_weights"] = [float(x) for x in w]
         history.append(r)
 
     # Final scoring: chosen split, full precision and with an int8 head.
@@ -245,7 +285,7 @@ def main():
         with open(args.out, "w") as f:
             json.dump({"args": vars(args), "clients": [c["name"] for c in clients_np],
                        "head_params": n_head, "total_params": n_total,
-                       "comm": comm, "rounds": history,
+                       "comm": comm, "agg": agg_info, "rounds": history,
                        "final": {"split": args.eval_split, "fp32": final, "int8_head": final_int8}},
                       f, indent=2)
         print(f"saved results to {args.out}")
