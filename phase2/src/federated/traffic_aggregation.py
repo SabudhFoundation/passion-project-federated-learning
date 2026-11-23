@@ -18,6 +18,9 @@ Substitutions for our data (LargeST has flow but no speed column):
 The paper inverts R during normalisation so fresher clients score higher. We do
 that by normalising -R, i.e. (max R - R_k) / (max R - min R + eps).
 
+Optional (penalize_instability): sigma and Psi enter the score as 1 - their
+normalised value, so the least stable clients get the least weight.
+
 Two additions that are not in the paper:
   * If every score is 0 (all clients identical, so every normalised metric is 0)
     the traffic weights fall back to uniform instead of dividing by zero.
@@ -81,13 +84,19 @@ def minmax(Z, eps=EPS):
     return (Z - lo) / (hi - lo + eps)
 
 
-def aggregation_weights(Z, sizes, coef=(1.0,) * 6, floor=0.1, eps=EPS):
+def aggregation_weights(Z, sizes, coef=(1.0,) * 6, floor=0.1, eps=EPS,
+                        penalize_instability=False):
     """Final per-client weights plus the pieces they were built from.
 
     Z      (K, 6) raw metrics in METRICS order
     sizes  training examples per client (what FedAvg weights by)
     coef   (alpha, beta, gamma, delta, epsilon, eta) of Eq. 14, all >= 0
     floor  share of the FedAvg weights mixed in, in [0, 1]
+    penalize_instability
+           score sigma and Psi as (1 - normalised value), so the most variable
+           clients get the least weight. The paper's text says beta and eta
+           penalise instability, but Eq. 14 with positive coefficients rewards it;
+           this flag follows the text.
     """
     Z = np.asarray(Z, dtype=np.float64)
     if Z.ndim != 2 or Z.shape[1] != 6:
@@ -104,6 +113,8 @@ def aggregation_weights(Z, sizes, coef=(1.0,) * 6, floor=0.1, eps=EPS):
     signed = Z.copy()
     signed[:, R] = -signed[:, R]   # invert recency: fresher data -> higher value
     Zn = minmax(signed, eps)
+    if penalize_instability:
+        Zn[:, [SIGMA, PSI]] = 1.0 - Zn[:, [SIGMA, PSI]]
 
     score = Zn[:, list(COEF_COLUMNS)] @ coef                      # Eq. 14
     total = score.sum()

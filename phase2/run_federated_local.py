@@ -51,6 +51,9 @@ def get_args():
                         "paired with V,sigma,mu,R,Phi,Psi")
     p.add_argument("--agg-floor", type=float, default=0.1,
                    help="traffic agg only: final weight = (1-floor)*traffic + floor*fedavg")
+    p.add_argument("--agg-penalize-instability", action="store_true",
+                   help="traffic agg only: score sigma and Psi as (1 - normalised value), so "
+                        "unstable clients get less weight (the paper's text; its Eq. 14 rewards them)")
     return p.parse_args()
 
 def main():
@@ -102,7 +105,7 @@ def main():
           f"|  total params: {global_model.n_params():,}")
     print(f"Clients: {len(partitions)}  |  rounds: {args.rounds}  |  "
           f"resample: {args.resample}  |  batch: {args.batch_size}  |  device: {device}  |  "
-          f"agg: {args.agg}\n")
+          f"agg: {args.agg}{' (penalize instability)' if args.agg_penalize_instability else ''}\n")
 
     # Traffic-aware agg: client metrics from the training split only. The training
     # data is fixed, so the metrics (and weights) are the same every round.
@@ -111,6 +114,7 @@ def main():
         raw = [client_metrics(c["train"], c["scaler"]) for c in clients_np]
         Z = metric_matrix(raw)
         agg_info.update({"coef": args.agg_coef, "floor": args.agg_floor,
+                         "penalize_instability": args.agg_penalize_instability,
                          "metric_names": list(METRICS), "metrics": Z.tolist()})
         print("traffic agg metrics (train split): " + "  ".join(f"{m:>9}" for m in METRICS))
         for c, row in zip(clients_np, Z):
@@ -176,7 +180,10 @@ def main():
         for ci, loader in enumerate(loaders):
             adj_mask, adj_norm = adjacencies[ci]
             results.append(evaluate(model, loader, adj_mask, adj_norm, clients_np[ci]["scaler"]))
-        return average(results)
+        out = average(results)
+        # per-district scores as well, so a client hurt by the aggregation is visible
+        out["per_client"] = [{"name": clients_np[ci]["name"], **res} for ci, res in enumerate(results)]
+        return out
 
     def quantized_copy(model):
         """Copy with the head's weights rounded to int8 (symmetric, per tensor) and back.
@@ -223,7 +230,8 @@ def main():
         # Traffic: same weighted average, with weights from the traffic metrics.
         sizes = np.array(sizes, dtype=float)
         if args.agg == "traffic":
-            w, parts = aggregation_weights(Z, sizes, args.agg_coef, args.agg_floor)
+            w, parts = aggregation_weights(Z, sizes, args.agg_coef, args.agg_floor,
+                                           penalize_instability=args.agg_penalize_instability)
             agg_info.update({"normalized": parts["normalized"].tolist(),
                              "traffic_weights": parts["traffic"].tolist(),
                              "fedavg_weights": parts["fedavg"].tolist()})
@@ -265,6 +273,9 @@ def main():
     for h, s in enumerate(final["steps"]):
         print(f"  {15 * (h + 1):3d} min | MAE {s['mae']:.3f} | RMSE {s['rmse']:.3f} | "
               f"MAPE {s['mape']:.2f}% | R2 {s['r2']:+.3f}")
+    for c in final["per_client"]:
+        print(f"  {c['name']:14} | MAE {c['mae']:.3f} | RMSE {c['rmse']:.3f} | "
+              f"MAPE {c['mape']:.2f}% | R2 {c['r2']:+.3f}")
 
     # Communication: every client uploads the whole model each round.
     n_total = global_model.n_params()

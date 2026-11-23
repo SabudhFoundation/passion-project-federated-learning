@@ -103,6 +103,27 @@ class TestAggregationWeights(unittest.TestCase):
         np.testing.assert_allclose(beta_only["traffic"], [0.0, 1.0])
         np.testing.assert_allclose(gamma_only["traffic"], [1.0, 0.0])
 
+    def test_penalize_instability_flips_sigma_and_psi(self):
+        # client 2 is the most variable (highest sigma and Psi), client 0 the most stable
+        Z = np.ones((3, 6))
+        Z[:, SIGMA] = [10.0, 20.0, 40.0]
+        Z[:, PSI] = [1.0, 3.0, 5.0]
+        Z[:, MU] = [5.0, 1.0, 9.0]
+        sizes = [1, 1, 1]
+        coef = [0, 1, 0, 0, 0, 1]               # beta and eta only
+        _, plain = aggregation_weights(Z, sizes, coef, 0.0)
+        _, pen = aggregation_weights(Z, sizes, coef, 0.0, penalize_instability=True)
+        self.assertEqual(int(np.argmax(plain["traffic"])), 2)   # Eq. 14 rewards instability
+        self.assertEqual(int(np.argmax(pen["traffic"])), 0)     # the flag penalises it
+        np.testing.assert_allclose(pen["normalized"][:, [SIGMA, PSI]],
+                                   1.0 - plain["normalized"][:, [SIGMA, PSI]])
+        np.testing.assert_array_equal(pen["normalized"][:, MU], plain["normalized"][:, MU])
+        self.assertAlmostEqual(pen["traffic"].sum(), 1.0, places=12)
+        # identical clients still get equal weights
+        w, _ = aggregation_weights(np.ones((4, 6)), [5] * 4, [1.0] * 6, 0.1,
+                                   penalize_instability=True)
+        np.testing.assert_allclose(w, 0.25, rtol=0, atol=1e-15)
+
     def test_bad_inputs_raise(self):
         Z = np.ones((2, 6))
         with self.assertRaises(ValueError):

@@ -21,9 +21,11 @@ python -m unittest discover -s tests -v        # aggregation weight tests (numpy
 
 Traffic-aware flags: `--agg-coef a,b,g,d,e,h` sets (α, β, γ, δ, ε, η) of Eq. 14
 below (default all 1.0), and `--agg-floor` sets the FedAvg share (default 0.1).
+`--agg-penalize-instability` scores σ and Ψ as (1 − normalised value) (see below).
 The per-client weights for every round are saved under `rounds[i].agg_weights` in
 the `--out` JSON. The raw and normalised metrics and the weights before the floor
-are saved under `agg`.
+are saved under `agg`. Every score (each round's val score and the final score)
+also has `per_client`: MAE, RMSE, MAPE and R2 for each district.
 
 ## Layout
 
@@ -137,6 +139,21 @@ The coefficients are non-negative. The paper samples them from $[0.1, 1.5]$ and
 grid-searches. The week 2 notebook does 8 random draws scored on the validation
 split. All coefficients are positive, so a higher $\sigma$ or $\Psi$ raises a
 client's weight.
+
+**Penalize-instability variant (`--agg-penalize-instability`, our addition).**
+The paper's text says $\beta$ and $\eta$ "penalize instability", but Eq. 14 with
+positive coefficients rewards it. This flag follows the text: $\sigma$ and $\Psi$
+enter the score as one minus their normalised value, so the most variable client
+contributes 0 on those terms and the most stable contributes 1:
+
+$$
+\omega_k^{\text{pen}} = \alpha\,\tilde V_k + \beta\,(1 - \tilde\sigma_k) + \gamma\,\tilde\mu_k
+         + \delta\,\tilde R_k + \epsilon\,\tilde\Phi_k + \eta\,(1 - \tilde\Psi_k)
+$$
+
+with the same Eq. 13 normalisation. Everything else is unchanged: normalise to sum 1, apply the floor, then Eq. 15. If $\sigma$ (or
+$\Psi$) is the same for every client, its normalised value is 0 for all, so the
+term adds the same constant $\beta$ (or $\eta$) to every client.
 
 **Normalised weights (Algorithm 1, step 11).**
 
